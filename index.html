@@ -4782,6 +4782,25 @@
             const confCode = p.conference_code || (sess ? sess.conference_code : '');
             const sessTitle = sess ? sess.title : '';
             const conflictInfo = getPaperConflictStatus(p, slotItem.slotData);
+
+            let sessId = p.session_id;
+            if (!sessId && PROGRAM_DATA.sessions) {
+              for (const sKey in PROGRAM_DATA.sessions) {
+                const s = PROGRAM_DATA.sessions[sKey];
+                if (s.paper_ids && s.paper_ids.map(String).includes(String(p.id))) {
+                  sessId = sKey;
+                  break;
+                }
+                if (s.date === p.date && s.room && p.room && String(s.room).trim().toLowerCase() === String(p.room).trim().toLowerCase()) {
+                  if (s.start_time <= p.start_time && s.end_time >= p.end_time) {
+                    sessId = sKey;
+                    break;
+                  }
+                }
+              }
+            }
+            const sessionUrl = sessId ? getConfexSessionUrl(sessId) : '';
+
             let badgeHtml = '';
             if (conflictInfo.hasConflict) {
               badgeHtml = conflictInfo.isPrimary 
@@ -4789,12 +4808,16 @@
                 : '<span style="font-weight:700;color:#475569;background:#f1f5f9;padding:1px 6px;border-radius:3px;border:1px solid #cbd5e1;font-size:7.5pt;">ALTERNATE</span>';
             }
 
+            const roomHtml = sessionUrl
+              ? `<a href="${sessionUrl}" target="_blank" rel="noopener noreferrer" style="font-weight:700;color:#1e40af;background:#eff6ff;padding:1px 5px;border-radius:3px;border:1px solid #bfdbfe;text-decoration:none;">Room ${escapeHtml(p.room || 'TBD')}</a>`
+              : `<span style="font-weight:700;color:#334155;background:#f8fafc;padding:1px 5px;border-radius:3px;border:1px solid #cbd5e1;">Room ${escapeHtml(p.room || 'TBD')}</span>`;
+
             html += `
               <div class="avoid-break" style="${pIdx > 0 ? 'border-top:1px dashed #e2e8f0;padding-top:7px;' : ''}">
                 <div style="display:flex;align-items:center;gap:6px;font-size:8pt;margin-bottom:3px;flex-wrap:wrap;">
                   ${badgeHtml}
                   <span style="font-weight:700;color:#1d4ed8;background:#eff6ff;padding:1px 5px;border-radius:3px;border:1px solid #bfdbfe;">${formatTime(p.start_time)} - ${formatTime(p.end_time)}</span>
-                  <span style="font-weight:700;color:#334155;background:#f8fafc;padding:1px 5px;border-radius:3px;border:1px solid #cbd5e1;">Room ${escapeHtml(p.room || 'TBD')}</span>
+                  ${roomHtml}
                   ${confCode ? `<span style="font-weight:800;color:#92400e;background:#fef3c7;padding:1px 5px;border-radius:3px;border:1px solid #fde68a;text-transform:uppercase;">${escapeHtml(confCode)}</span>` : ''}
                   ${p.number ? `<span style="color:#64748b;font-weight:600;">#${escapeHtml(p.number)}</span>` : ''}
                   ${p.withdrawn ? `<span style="color:#b91c1c;background:#fee2e2;padding:1px 5px;border-radius:3px;font-weight:700;">⚠️ WITHDRAWN</span>` : ''}
@@ -4802,7 +4825,7 @@
                 <div style="font-size:9.5pt;font-weight:800;color:#0f172a;line-height:1.3;margin-bottom:2px;">
                   ${escapeHtml(p.title)}
                 </div>
-                ${sessTitle ? `<div style="font-size:8pt;color:#475569;margin-bottom:2px;"><strong style="color:#334155;">Session:</strong> ${escapeHtml(sessTitle)}</div>` : ''}
+                ${sessTitle ? `<div style="font-size:8pt;color:#475569;margin-bottom:2px;"><strong style="color:#334155;">Session:</strong> ${sessionUrl ? `<a href="${sessionUrl}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:none;font-weight:600;">${escapeHtml(sessTitle)}</a>` : escapeHtml(sessTitle)}</div>` : ''}
                 <div style="font-size:8pt;color:#475569;">
                   <strong style="color:#0f172a;">${escapeHtml(p.presenter || 'Author')}</strong>
                   ${p.authors ? `<span style="color:#94a3b8;margin:0 4px;">•</span><span style="color:#64748b;">${escapeHtml(truncate(p.authors, 120))}</span>` : ''}
@@ -4912,6 +4935,25 @@
             const sessTitle = sess ? sess.title : '';
             const confexUrl = getConfexPaperUrl(p.id);
             const conflictInfo = getPaperConflictStatus(p, slotItem.slotData);
+
+            let sessId = p.session_id;
+            if (!sessId && PROGRAM_DATA.sessions) {
+              for (const sKey in PROGRAM_DATA.sessions) {
+                const s = PROGRAM_DATA.sessions[sKey];
+                if (s.paper_ids && s.paper_ids.map(String).includes(String(p.id))) {
+                  sessId = sKey;
+                  break;
+                }
+                if (s.date === p.date && s.room && p.room && String(s.room).trim().toLowerCase() === String(p.room).trim().toLowerCase()) {
+                  if (s.start_time <= p.start_time && s.end_time >= p.end_time) {
+                    sessId = sKey;
+                    break;
+                  }
+                }
+              }
+            }
+            const sessionUrl = sessId ? getConfexSessionUrl(sessId) : '';
+
             let badgeHtml = '';
             if (conflictInfo.hasConflict) {
               badgeHtml = conflictInfo.isPrimary 
@@ -4921,12 +4963,16 @@
               badgeHtml = '<span style="font-weight:700;color:#1d4ed8;background:#dbeafe;padding:2px 8px;border-radius:4px;border:1px solid #bfdbfe;font-size:10px;">POSTER</span>';
             }
 
+            const roomHtml = sessionUrl
+              ? `<a href="${sessionUrl}" target="_blank" rel="noopener noreferrer" style="font-weight:700;color:#1d4ed8;background:#f0f7ff;padding:2px 6px;border-radius:4px;border:1px solid #bfdbfe;text-decoration:none;display:inline-flex;align-items:center;gap:3px;" title="Open official session at this time in Room ${escapeHtml(p.room || 'TBD')} on AGU Meeting App"><span>Room ${escapeHtml(p.room || 'TBD')}</span><span style="font-size:9px;color:#3b82f6;">↗</span></a>`
+              : `<span style="font-weight:700;color:#334155;background:#f8fafc;padding:2px 6px;border-radius:4px;border:1px solid #e2e8f0;">Room ${escapeHtml(p.room || 'TBD')}</span>`;
+
             daysBodyHtml += `
               <div style="${pIdx > 0 ? 'border-top:1px solid #f1f5f9;padding-top:14px;' : ''}">
                 <div style="display:flex;align-items:center;gap:6px;font-size:11px;margin-bottom:6px;flex-wrap:wrap;">
                   ${badgeHtml}
                   <span style="font-weight:700;color:#1d4ed8;background:#eff6ff;padding:2px 6px;border-radius:4px;border:1px solid #bfdbfe;">${formatTime(p.start_time)} - ${formatTime(p.end_time)}</span>
-                  <span style="font-weight:700;color:#334155;background:#f8fafc;padding:2px 6px;border-radius:4px;border:1px solid #e2e8f0;">Room ${escapeHtml(p.room || 'TBD')}</span>
+                  ${roomHtml}
                   ${confCode ? `<span style="font-weight:800;color:#92400e;background:#fef3c7;padding:2px 6px;border-radius:4px;border:1px solid #fde68a;text-transform:uppercase;">${escapeHtml(confCode)}</span>` : ''}
                   ${p.number ? `<span style="color:#64748b;font-weight:600;">#${escapeHtml(p.number)}</span>` : ''}
                   ${p.withdrawn ? `<span style="color:#b91c1c;background:#fee2e2;padding:2px 6px;border-radius:4px;font-weight:700;">⚠️ WITHDRAWN</span>` : ''}
@@ -4934,7 +4980,7 @@
                 <h4 style="margin:0 0 5px 0;font-size:14px;font-weight:800;color:#0f172a;line-height:1.35;">
                   <a href="${confexUrl}" target="_blank" rel="noopener noreferrer" style="color:#0f172a;text-decoration:none;">${escapeHtml(p.title)}</a>
                 </h4>
-                ${sessTitle ? `<div style="font-size:11px;color:#64748b;margin-bottom:4px;"><strong style="color:#475569;">Session:</strong> ${escapeHtml(sessTitle)}</div>` : ''}
+                ${sessTitle ? `<div style="font-size:11px;color:#64748b;margin-bottom:4px;"><strong style="color:#475569;">Session:</strong> ${sessionUrl ? `<a href="${sessionUrl}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:none;font-weight:600;" title="Open official session on AGU Meeting App">${escapeHtml(sessTitle)} ↗</a>` : escapeHtml(sessTitle)}</div>` : ''}
                 <div style="font-size:11px;color:#475569;display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px;">
                   <div>
                     <strong style="color:#1e293b;">${escapeHtml(p.presenter || 'Author')}</strong>
