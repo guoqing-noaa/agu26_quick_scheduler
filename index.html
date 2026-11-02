@@ -525,7 +525,7 @@
           <div class="flex flex-col md:flex-row gap-3">
             <!-- Search Input -->
             <div class="flex-1 relative">
-              <input type="text" id="searchInput" oninput="onSearchOrFilterChange()" placeholder="Search by author, keyword, title, or abstract (e.g. 'radar data assimilation', 'machine learning', 'RRFS')..." class="w-full pl-10 pr-4 py-2.5 text-xs sm:text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none shadow-sm">
+              <input type="text" id="searchInput" oninput="onSearchInputDebounced()" onkeydown="if(event.key==='Enter'){clearTimeout(SEARCH_DEBOUNCE_TIMER);onSearchOrFilterChange();}" placeholder="Search by author, keyword, title, or abstract (e.g. 'radar data assimilation', 'machine learning', 'RRFS')..." class="w-full pl-10 pr-4 py-2.5 text-xs sm:text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none shadow-sm">
               <svg class="w-5 h-5 text-slate-400 absolute left-3 top-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
             </div>
 
@@ -1053,6 +1053,7 @@
       initTopicTags();
       initAIKeywordChips();
       buildAuthorAliasMap();
+      buildSearchIndex();
       checkScheduleChanges();
       updateScheduledCount();
       updateFooterCounts();
@@ -1099,6 +1100,23 @@
         withdrawn: s.withdrawn || false,
         is_event: true
       };
+    }
+
+    // ================= HIGH-PERFORMANCE SEARCH CACHE & INDEXING =================
+    function indexPaperForSearch(p) {
+      if (!p) return;
+      const pres = p.presenter || '';
+      const auth = p.authors || '';
+      const authorText = `${pres} ${auth}`.toLowerCase();
+      p._searchStr = `${p.id || ''} ${p.number || ''} ${p.title || ''} ${authorText} ${p.abstract || ''} ${p.room || ''}`.toLowerCase();
+      p._authorText = authorText;
+    }
+
+    function buildSearchIndex() {
+      if (!PROGRAM_DATA || !PROGRAM_DATA.papers) return;
+      for (const pid in PROGRAM_DATA.papers) {
+        indexPaperForSearch(PROGRAM_DATA.papers[pid]);
+      }
     }
 
     // ================= AUTHOR ALIAS INDEXING & HELPERS =================
@@ -1584,6 +1602,7 @@
           const eventPaperId = 'sess_event_' + s.id;
           if (!PROGRAM_DATA.papers[eventPaperId]) {
             PROGRAM_DATA.papers[eventPaperId] = createEventPaperFromSession(s);
+            indexPaperForSearch(PROGRAM_DATA.papers[eventPaperId]);
           }
           s.paper_ids = [eventPaperId];
         } else {
@@ -1594,15 +1613,104 @@
 
       const allScheduled = s.paper_ids.length > 0 && s.paper_ids.every(pid => isPaperScheduled(pid));
 
-      s.paper_ids.forEach(pid => {
-        if (allScheduled) {
-          removePaperFromSchedule(pid);
-        } else {
-          if (!isPaperScheduled(pid)) togglePaperSchedule(pid);
-        }
-      });
+      if (allScheduled) {
+        // Batch remove all papers in session from USER_SCHEDULE in 1 pass
+        s.paper_ids.forEach(pid => {
+          const pidStr = String(pid);
+          for (const sKey in USER_SCHEDULE) {
+            if (!USER_SCHEDULE[sKey]) continue;
+            let ids = getSlotTalkIds(USER_SCHEDULE[sKey]);
+            const beforeCount = ids.length;
+            ids = ids.filter(id => String(id) !== pidStr);
+            if (ids.length < beforeCount) {
+              if (ids.length === 0) {
+                delete USER_SCHEDULE[sKey];
+                EXPANDED_SCHEDULE_SLOTS.delete(sKey);
+                for (const key of EXPANDED_SCHEDULE_CONFLICTS) {
+                  if (key.startsWith(sKey + '_') || key === sKey) {
+                    EXPANDED_SCHEDULE_CONFLICTS.delete(key);
+                  }
+                }
+              } else {
+                USER_SCHEDULE[sKey].talk_ids = ids;
+                if (USER_SCHEDULE[sKey].primary_id === pidStr) {
+                  USER_SCHEDULE[sKey].primary_id = ids[0];
+                }
+                if (Array.isArray(USER_SCHEDULE[sKey].primary_talk_ids)) {
+                  USER_SCHEDULE[sKey].primary_talk_ids = USER_SCHEDULE[sKey].primary_talk_ids.filter(id => String(id) !== pidStr);
+                }
+                if (ids.length <= 1) {
+                  EXPANDED_SCHEDULE_SLOTS.delete(sKey);
+                  for (const key of EXPANDED_SCHEDULE_CONFLICTS) {
+                    if (key.startsWith(sKey + '_') || key === sKey) {
+                      EXPANDED_SCHEDULE_CONFLICTS.delete(key);
+                    }
+                  }
+                }
+                delete USER_SCHEDULE[sKey].primary;
+                delete USER_SCHEDULE[sKey].alternate;
+              }
+            }
+          }
+        });
+      } else {
+        // Batch add all papers in session to USER_SCHEDULE in 1 pass
+        s.paper_ids.forEach(pid => {
+          const pidStr = String(pid);
+          if (isPaperScheduled(pidStr)) return;
+          const p = PROGRAM_DATA.papers[pidStr];
+          if (!p) return;
 
-      renderExplorerSessionsList();
+          const slotInfo = getSlotKey(p.date, p.start_time);
+          const slotKey = slotInfo.key;
+
+          if (!USER_SCHEDULE[slotKey]) {
+            USER_SCHEDULE[slotKey] = {
+              date: p.date,
+              slotLabel: slotInfo.label,
+              talk_ids: [pidStr],
+              primary_id: pidStr
+            };
+          } else {
+            let ids = getSlotTalkIds(USER_SCHEDULE[slotKey]);
+            if (!ids.some(id => String(id) === pidStr)) {
+              ids.push(pidStr);
+            }
+            USER_SCHEDULE[slotKey].talk_ids = ids;
+            if (!USER_SCHEDULE[slotKey].primary_id) {
+              USER_SCHEDULE[slotKey].primary_id = ids[0];
+            }
+            delete USER_SCHEDULE[slotKey].primary;
+            delete USER_SCHEDULE[slotKey].alternate;
+          }
+
+          if (p.conference_id && !SELECTED_CONFERENCES.has(p.conference_id)) {
+            SELECTED_CONFERENCES.add(p.conference_id);
+          }
+          if (p.date && !SELECTED_DAYS.has(p.date)) {
+            SELECTED_DAYS.add(p.date);
+          }
+        });
+      }
+
+      // Single batched update pass
+      saveStateToStorage();
+      initDateCards();
+      initDaysDropdown();
+      initSetupConferenceTable();
+      renderScheduleView();
+      updateScheduledCount();
+      updateFooterCounts();
+      onSearchOrFilterChange();
+
+      if (!document.getElementById('conferenceExplorerModal').classList.contains('hidden')) {
+        renderExplorerSessionsList();
+        updateExplorerConferenceButton();
+      }
+      if (CURRENT_MODAL_SESSION_ID && String(CURRENT_MODAL_SESSION_ID) === String(sessionId)) {
+        updateSessionModalAddAllButton(s);
+        renderSessionModalTalks(s);
+      }
     }
 
     // ================= FIRST PAGE: DATE SELECTION =================
@@ -2628,6 +2736,12 @@
     }
 
     // ================= BROWSE & FILTER LOGIC =================
+    let SEARCH_DEBOUNCE_TIMER = null;
+    function onSearchInputDebounced() {
+      clearTimeout(SEARCH_DEBOUNCE_TIMER);
+      SEARCH_DEBOUNCE_TIMER = setTimeout(onSearchOrFilterChange, 120);
+    }
+
     function showAllConferencesForSearch() {
       setSearchScopeMode('global');
     }
@@ -2639,7 +2753,7 @@
       const typeFilter = document.getElementById('filterType').value;
 
       // Detect if user pasted an AGU URL or Paper/Session ID
-      const urlPaperMatch = query.match(/\/Paper\/(\d+)/i) || (query.match(/^\d{5,6}$/) ? query.match(/\d+/) : null);
+      const urlPaperMatch = query.match(/\/Paper\/(\d+)/i) || (query.match(/^\d{5,7}$/) ? query.match(/\d+/) : null);
       const urlSessionMatch = query.match(/\/Session\/(\d+)/i);
       const urlPaperId = urlPaperMatch ? (urlPaperMatch[1] || urlPaperMatch[0]) : null;
       const urlSessionId = urlSessionMatch ? (urlSessionMatch[1] || urlSessionMatch[0]) : null;
@@ -2693,20 +2807,18 @@
           if (!hasAll) continue;
         }
 
-        // Query matching: matches standard fields OR author alias OR direct URL match
+        // Query matching: matches fast pre-cached index OR author alias OR direct URL match
         if (queryTerms.length > 0) {
-          const authorText = `${p.presenter} ${p.authors}`;
-          const authorTextLower = authorText.toLowerCase();
-          const haystack = `${p.id} ${p.number || ''} ${p.title} ${authorTextLower} ${p.abstract} ${p.room}`.toLowerCase();
-
           const urlMatch = (urlPaperId && (p.id === urlPaperId || String(p.id) === String(urlPaperId))) ||
                            (urlSessionId && (p.session_id === urlSessionId || String(p.session_id) === String(urlSessionId)));
 
-          const matchStd = urlMatch || queryTerms.every(term => haystack.includes(term));
+          const sStr = p._searchStr || `${p.id} ${p.number || ''} ${p.title} ${p.presenter} ${p.authors} ${p.abstract} ${p.room}`.toLowerCase();
+          const matchStd = urlMatch || queryTerms.every(term => sStr.includes(term));
           let matchAuthorAlias = false;
 
           if (!matchStd && aliasPatterns.length > 0) {
-            matchAuthorAlias = aliasPatterns.some(pat => pat.test(authorText));
+            const aText = p._authorText || `${p.presenter} ${p.authors}`.toLowerCase();
+            matchAuthorAlias = aliasPatterns.some(pat => pat.test(aText));
           }
 
           if (!matchStd && !matchAuthorAlias) continue;
@@ -2734,14 +2846,17 @@
         } else {
           // Check total matches across whole meeting
           let allMeetingPapers = [];
-          for (const pid in PROGRAM_DATA.papers) {
-            const p = PROGRAM_DATA.papers[pid];
-            const authorText = `${p.presenter} ${p.authors}`;
-            const haystack = `${p.title} ${authorText} ${p.abstract} ${p.room}`.toLowerCase();
-            const matchStd = queryTerms.every(term => haystack.includes(term));
-            const matchAuthorAlias = !matchStd && aliasPatterns.length > 0 && aliasPatterns.some(pat => pat.test(authorText));
-            if (matchStd || matchAuthorAlias) {
-              allMeetingPapers.push(p);
+          if (SEARCH_SCOPE === 'global' && !dayFilter && !typeFilter && ACTIVE_TOPIC_TAGS.size === 0) {
+            allMeetingPapers = results;
+          } else {
+            for (const pid in PROGRAM_DATA.papers) {
+              const p = PROGRAM_DATA.papers[pid];
+              const sStr = p._searchStr || `${p.id} ${p.number || ''} ${p.title} ${p.presenter} ${p.authors} ${p.abstract} ${p.room}`.toLowerCase();
+              const matchStd = urlPaperId ? (p.id === urlPaperId || String(p.id) === String(urlPaperId)) : queryTerms.every(term => sStr.includes(term));
+              const matchAuthorAlias = !matchStd && aliasPatterns.length > 0 && aliasPatterns.some(pat => pat.test(p._authorText || ''));
+              if (matchStd || matchAuthorAlias) {
+                allMeetingPapers.push(p);
+              }
             }
           }
 
@@ -4007,7 +4122,7 @@
         abstract = t.textContent.replace(/\s+/g, ' ').trim();
       }
 
-      return {
+      const paperObj = {
         id: String(pid),
         title: title,
         presenter: presenter || 'Speaker',
@@ -4021,6 +4136,8 @@
         type: data.Type || 'Oral',
         is_custom: true
       };
+      indexPaperForSearch(paperObj);
+      return paperObj;
     }
 
     async function fetchAndDisplayConfexPaper(pid, container) {
@@ -4297,6 +4414,7 @@
       };
 
       // Add to PROGRAM_DATA
+      indexPaperForSearch(customPaper);
       PROGRAM_DATA.papers[pid] = customPaper;
       CUSTOM_PAPERS[pid] = customPaper;
       localStorage.setItem('agu_custom_papers', JSON.stringify(CUSTOM_PAPERS));
